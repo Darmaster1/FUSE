@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+<title>FUSE – Enhanced Edition</title>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0a0a0f;
+    --surface: #13131c;
+    --surface2: #1c1c2e;
+    --border: #2a2a3e;
+    --text: #f0f0ff;
+    --text-muted: #6b6b8a;
+    --danger: #ff4444;
+    --danger-glow: rgba(255,68,68,0.3);
+    --orange: #ff7c2a;
+    --orange-glow: rgba(255,124,42,0.3);
+    --safe: #00d4aa;
+    --safe-glow: rgba(0,212,170,0.3);
+    --blue: #4d8eff;
+    --purple: #9d4eff;
+    --gold: #ffd700;
+    --heart: #ff4d6d;
+    --radius: 12px;
+    --font: 'Segoe UI', system-ui, sans-serif;
+  }
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font); overflow: hidden; }
+  #app { height: 100vh; display: flex; flex-direction: column; max-width: 480px; margin: 0 auto; position: relative; overflow: hidden; }
+
+  /* ── Screen system ── */
+  .screen { display: none; flex-direction: column; height: 100%; overflow-y: auto; padding: 20px 16px 32px; }
+  .screen.active { display: flex; }
+
+  /* ── Typography ── */
+  h1.logo { font-size: 3rem; font-weight: 900; letter-spacing: -2px; text-align: center;
+    background: linear-gradient(135deg, #ff4444, #ff7c2a, #ffd700);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: var(--text-muted); text-align: center; font-size: 0.875rem; margin-top: 4px; }
+  h2 { font-size: 1.25rem; font-weight: 700; }
+  h3 { font-size: 1rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; font-size: 0.75rem; }
+
+  /* ── Form elements ── */
+  input, select { width: 100%; padding: 14px 16px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text); font-size: 1rem; outline: none; transition: border-color 0.2s; }
+  input:focus { border-color: var(--danger); }
+  label { display: block; font-size: 0.875rem; color: var(--text-muted); margin-bottom: 6px; }
+  .field { margin-bottom: 14px; }
+
+  /* ── Buttons ── */
+  button { min-height: 48px; border: none; border-radius: var(--radius); font-size: 1rem; font-weight: 600;
+    cursor: pointer; transition: all 0.15s; display: flex; align-items: center; justify-content: center; gap: 8px; }
+  button:active { transform: scale(0.96); }
+  .btn-primary { background: linear-gradient(135deg, #ff4444, #ff7c2a); color: white; width: 100%; padding: 16px; font-size: 1.125rem; box-shadow: 0 4px 20px var(--danger-glow); }
+  .btn-primary:hover { box-shadow: 0 6px 28px var(--danger-glow); }
+  .btn-secondary { background: var(--surface2); color: var(--text); width: 100%; padding: 14px; border: 1px solid var(--border); }
+  .btn-secondary:hover { border-color: var(--blue); }
+  .btn-danger { background: rgba(255,68,68,0.15); color: var(--danger); border: 1px solid rgba(255,68,68,0.3); padding: 8px 14px; min-height: 36px; font-size: 0.875rem; border-radius: 8px; }
+  .btn-safe { background: rgba(0,212,170,0.15); color: var(--safe); border: 1px solid rgba(0,212,170,0.3); padding: 14px; width: 100%; }
+  .btn-sm { padding: 8px 14px; min-height: 36px; font-size: 0.85rem; border-radius: 8px; }
+  .btn-icon { background: transparent; color: var(--text-muted); padding: 6px; min-height: auto; border-radius: 6px; font-size: 1rem; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+  /* ── Cards ── */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+  .card + .card, .card + .field, .field + .card { margin-top: 12px; }
+
+  /* ── ─── HOME SCREEN ─── ── */
+  #homeScreen { justify-content: center; gap: 12px; }
+  .logo-wrap { text-align: center; margin-bottom: 8px; }
+  .tagline { color: var(--text-muted); font-size: 0.8rem; margin-top: 8px; }
+  .bomb-emoji { font-size: 4rem; display: block; text-align: center; animation: float 3s ease-in-out infinite; }
+  @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-10px)} }
+  .tabs { display: flex; background: var(--surface2); border-radius: var(--radius); padding: 4px; margin-bottom: 16px; }
+  .tab { flex: 1; padding: 10px; border-radius: 8px; background: transparent; color: var(--text-muted); font-size: 0.9rem; font-weight: 600; min-height: auto; }
+  .tab.active { background: var(--surface); color: var(--text); box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+
+  /* ── ─── LOBBY SCREEN ─── ── */
+  .room-code-display { background: var(--surface2); border: 2px solid var(--border); border-radius: var(--radius);
+    padding: 16px; text-align: center; cursor: pointer; transition: border-color 0.2s; }
+  .room-code-display:hover { border-color: var(--blue); }
+  .room-code-display .code { font-size: 2.5rem; font-weight: 900; letter-spacing: 8px; color: var(--safe); font-family: monospace; }
+  .room-code-display .hint { font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; }
+  .player-list { display: flex; flex-direction: column; gap: 8px; }
+  .player-item { display: flex; align-items: center; gap: 10px; padding: 12px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; transition: border-color 0.2s; }
+  .player-item.is-me { border-color: var(--blue); }
+  .player-avatar { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-size: 1.2rem; font-weight: 700; flex-shrink: 0; }
+  .player-name { flex: 1; font-weight: 600; }
+  .player-badges { display: flex; gap: 6px; align-items: center; }
+  .badge { font-size: 0.75rem; padding: 3px 8px; border-radius: 20px; font-weight: 600; }
+  .badge-host { background: rgba(255,215,0,0.15); color: var(--gold); border: 1px solid rgba(255,215,0,0.3); }
+  .badge-ready { background: rgba(0,212,170,0.15); color: var(--safe); border: 1px solid rgba(0,212,170,0.3); }
+  .badge-notready { background: rgba(107,107,138,0.15); color: var(--text-muted); border: 1px solid var(--border); }
+  .section-header { display: flex; align-items: center; justify-content: space-between; margin: 16px 0 8px; }
+  .settings-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
+  .setting-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .setting-row:last-child { border-bottom: none; }
+  .setting-label { font-size: 0.875rem; }
+  .setting-value { display: flex; align-items: center; gap: 8px; }
+  .toggle { position: relative; width: 44px; height: 24px; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider { position: absolute; inset: 0; background: var(--border); border-radius: 24px; cursor: pointer; transition: 0.3s; }
+  .toggle-slider::before { content:""; position: absolute; width: 18px; height: 18px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: 0.3s; }
+  .toggle input:checked + .toggle-slider { background: var(--safe); }
+  .toggle input:checked + .toggle-slider::before { transform: translateX(20px); }
+  .num-btn { width: 32px; height: 32px; border-radius: 8px; background: var(--surface2); color: var(--text); font-size: 1.2rem; min-height: auto; border: 1px solid var(--border); }
+  .lobby-actions { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .ready-row { display: flex; gap: 10px; }
+  .ready-row .btn-safe { flex: 1; }
+
+  /* ── ─── GAME SCREEN ─── ── */
+  #gameScreen { padding: 12px 12px 24px; }
+  .game-players-bar { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; flex-shrink: 0; }
+  .game-players-bar::-webkit-scrollbar { height: 3px; }
+  .game-players-bar::-webkit-scrollbar-track { background: transparent; }
+  .game-players-bar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
+  .game-player-chip { display: flex; flex-direction: column; align-items: center; gap: 4px; flex-shrink: 0;
+    padding: 8px; border-radius: 10px; background: var(--surface); border: 2px solid transparent; min-width: 60px; transition: all 0.3s; }
+  .game-player-chip.has-bomb { border-color: var(--danger); box-shadow: 0 0 12px var(--danger-glow); animation: bombPulse 0.8s ease-in-out infinite; }
+  .game-player-chip.eliminated { opacity: 0.3; }
+  .game-player-chip.is-me { border-color: var(--blue); }
+  @keyframes bombPulse { 0%,100%{box-shadow:0 0 8px var(--danger-glow)} 50%{box-shadow:0 0 20px var(--danger-glow)} }
+  .chip-avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.9rem; }
+  .chip-name { font-size: 0.65rem; color: var(--text-muted); max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+  .chip-lives { display: flex; gap: 1px; flex-wrap: wrap; justify-content: center; }
+  .life-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--heart); }
+  .life-dot.lost { background: var(--border); }
+
+  /* Center game area */
+  .game-center { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; }
+
+  /* Bomb holder view */
+  .bomb-display { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .bomb-graphic { font-size: 6rem; animation: bombShake 0.1s ease-in-out infinite; filter: drop-shadow(0 0 20px var(--danger)); }
+  @keyframes bombShake { 0%,100%{transform:rotate(-2deg)} 50%{transform:rotate(2deg)} }
+  .bomb-graphic.frozen { animation: none; filter: drop-shadow(0 0 20px #4d8eff); }
+  .timer-display { font-size: 5rem; font-weight: 900; font-family: monospace; line-height: 1;
+    background: linear-gradient(135deg, var(--danger), var(--orange));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    animation: timerPulse 1s ease-in-out infinite; }
+  .timer-display.low { animation: timerLow 0.3s ease-in-out infinite; }
+  .timer-display.frozen { background: linear-gradient(135deg, var(--blue), #a0c4ff) !important;
+    -webkit-background-clip: text; background-clip: text; animation: none !important; }
+  @keyframes timerPulse { 0%,100%{opacity:1} 50%{opacity:0.85} }
+  @keyframes timerLow { 0%,100%{transform:scale(1)} 50%{transform:scale(1.05)} }
+  .bomb-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: 100%; }
+  .btn-cut { background: linear-gradient(135deg, #ff4444, #ff0000); color: white; padding: 18px; font-size: 1.1rem; box-shadow: 0 4px 20px rgba(255,0,0,0.4); }
+  .btn-pass { background: linear-gradient(135deg, var(--blue), var(--purple)); color: white; padding: 18px; font-size: 1.1rem; box-shadow: 0 4px 20px rgba(77,142,255,0.4); }
+  .btn-powerup { background: linear-gradient(135deg, var(--purple), #cc00ff); color: white; padding: 14px; width: 100%; font-size: 1rem; box-shadow: 0 4px 16px rgba(157,78,255,0.4); }
+
+  /* Waiting view */
+  .waiting-display { text-align: center; color: var(--text-muted); }
+  .waiting-bomb-holder { font-size: 1.5rem; font-weight: 700; color: var(--text); margin-top: 8px; }
+  .waiting-bomb-emoji { font-size: 3rem; animation: float 2s ease-in-out infinite; }
+
+  /* Pass target list */
+  .pass-list { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 100; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; padding: 24px; gap: 12px; }
+  .pass-list h2 { color: var(--text); margin-bottom: 8px; }
+  .pass-targets { display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 360px; max-height: 60vh; overflow-y: auto; }
+  .pass-target-btn { background: var(--surface); border: 2px solid var(--border); border-radius: var(--radius);
+    padding: 14px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: all 0.2s; color: var(--text); text-align: left; font-size: 1rem; }
+  .pass-target-btn:hover { border-color: var(--blue); background: var(--surface2); }
+  .pass-target-btn:active { transform: scale(0.97); }
+  .pass-cancel { color: var(--text-muted); background: transparent; border: 1px solid var(--border); padding: 12px 24px; border-radius: var(--radius); width: 100%; max-width: 360px; }
+
+  /* ── ─── POST ROUND ─── ── */
+  #postRoundScreen { justify-content: center; align-items: center; gap: 16px; text-align: center; }
+  .winner-emoji { font-size: 5rem; animation: bounce 0.5s ease infinite alternate; }
+  @keyframes bounce { from{transform:translateY(0)} to{transform:translateY(-16px)} }
+  .winner-name { font-size: 2rem; font-weight: 900; background: linear-gradient(135deg, var(--gold), var(--orange)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .scores-list { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .score-row { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .score-row:last-child { border-bottom: none; }
+  .score-wins { margin-left: auto; font-weight: 700; color: var(--gold); font-size: 1.25rem; }
+
+  /* ── ─── EXPLOSION OVERLAY ─── ── */
+  #explosionOverlay { position: fixed; inset: 0; z-index: 999; background: radial-gradient(circle, #ff4400, #ff0000, #800000);
+    display: none; flex-direction: column; align-items: center; justify-content: center; gap: 12px; animation: explode 0.4s ease-out; }
+  #explosionOverlay.active { display: flex; }
+  @keyframes explode { from{opacity:0;transform:scale(0.8)} to{opacity:1;transform:scale(1)} }
+  .explosion-emoji { font-size: 8rem; animation: spin 0.5s ease-out; }
+  @keyframes spin { from{transform:rotate(-20deg) scale(0.5)} to{transform:rotate(0) scale(1)} }
+  .explosion-text { font-size: 1.5rem; font-weight: 900; color: white; text-align: center; text-shadow: 0 2px 8px rgba(0,0,0,0.5); }
+  .explosion-sub { color: rgba(255,255,255,0.7); font-size: 1rem; }
+
+  /* ── Toast ── */
+  #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(100px);
+    background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+    padding: 12px 20px; border-radius: var(--radius); font-weight: 500; font-size: 0.9rem;
+    transition: transform 0.3s, opacity 0.3s; z-index: 1000; max-width: 90vw; text-align: center; white-space: nowrap; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+  #toast.show { transform: translateX(-50%) translateY(0); }
+  #toast.error { border-color: var(--danger); color: var(--danger); }
+
+  /* ── Loading ── */
+  .spinner { width: 24px; height: 24px; border: 3px solid var(--border); border-top-color: var(--danger); border-radius: 50%; animation: spin2 0.8s linear infinite; }
+  @keyframes spin2 { to{transform:rotate(360deg)} }
+
+  /* ── Misc ── */
+  .divider { text-align: center; color: var(--text-muted); font-size: 0.8rem; margin: 4px 0; position: relative; }
+  .divider::before, .divider::after { content:""; position: absolute; top: 50%; width: 40%; height: 1px; background: var(--border); }
+  .divider::before { left: 0; } .divider::after { right: 0; }
+  .mt8 { margin-top: 8px; } .mt12 { margin-top: 12px; } .mt16 { margin-top: 16px; }
+  .gap8 { gap: 8px; } .flex-row { display: flex; } .flex-center { align-items: center; justify-content: center; }
+  .frozen-banner { background: rgba(77,142,255,0.15); border: 1px solid rgba(77,142,255,0.3); border-radius: 8px;
+    padding: 8px 14px; color: var(--blue); font-size: 0.875rem; text-align: center; width: 100%; }
+  .powerup-display { background: rgba(157,78,255,0.15); border: 1px solid rgba(157,78,255,0.3); border-radius: 8px;
+    padding: 8px 14px; color: var(--purple); font-size: 0.875rem; text-align: center; }
+
+  /* Skin colors */
+  .skin-1 { background: linear-gradient(135deg,#ff4444,#cc0000); }
+  .skin-2 { background: linear-gradient(135deg,#ff7c2a,#cc5500); }
+  .skin-3 { background: linear-gradient(135deg,#ffd700,#cc9900); }
+  .skin-4 { background: linear-gradient(135deg,#00d4aa,#009977); }
+  .skin-5 { background: linear-gradient(135deg,#4d8eff,#2255cc); }
+  .skin-6 { background: linear-gradient(135deg,#9d4eff,#6611cc); }
+  .skin-7 { background: linear-gradient(135deg,#ff4d9d,#cc0066); }
+  .skin-8 { background: linear-gradient(135deg,#aaaaaa,#555555); }
+
+  @media (min-height: 700px) {
+    h1.logo { font-size: 3.5rem; }
+    .bomb-graphic { font-size: 7rem; }
+    .timer-display { font-size: 6rem; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- HOME -->
+  <div id="homeScreen" class="screen active">
+    <div class="logo-wrap">
+      <span class="bomb-emoji">💣</span>
+      <h1 class="logo">FUSE</h1>
+      <p class="subtitle">ENHANCED EDITION</p>
+    </div>
+    <div class="tabs">
+      <button class="tab active" onclick="setTab('create')">Create Room</button>
+      <button class="tab" onclick="setTab('join')">Join Room</button>
+    </div>
+    <div class="field">
+      <label>Your Name</label>
+      <input id="homeName" type="text" placeholder="Enter your name..." maxlength="20" />
+    </div>
+    <div id="createTab">
+      <button class="btn-primary mt8" onclick="createRoom()">Create Room</button>
+    </div>
+    <div id="joinTab" style="display:none">
+      <div class="field">
+        <label>Room Code</label>
+        <input id="homeCode" type="text" placeholder="FUSE1234" maxlength="8" style="text-transform:uppercase;letter-spacing:4px;font-size:1.2rem" />
+      </div>
+      <button class="btn-primary" onclick="joinRoom()">Join Room</button>
+    </div>
+    <p class="tagline mt12" style="text-align:center">Pass the bomb. Don't get caught.</p>
+  </div>
+
+  <!-- LOBBY -->
+  <div id="lobbyScreen" class="screen">
+    <div class="section-header">
+      <h2>Lobby</h2>
+      <button class="btn-sm btn-secondary" style="width:auto" onclick="leaveRoom()">Leave</button>
+    </div>
+
+    <div class="room-code-display mt8" onclick="copyCode()">
+      <div class="code" id="lobbyCode">FUSE----</div>
+      <div class="hint">Tap to copy room code</div>
+    </div>
+
+    <div class="section-header mt16">
+      <h3>Players (<span id="playerCount">0</span>)</h3>
+    </div>
+    <div class="player-list" id="playerList"></div>
+
+    <div id="hostSettingsSection" style="display:none">
+      <div class="section-header mt16">
+        <h3>Settings</h3>
+      </div>
+      <div class="settings-panel">
+        <div class="setting-row">
+          <span class="setting-label">Starting Lives</span>
+          <div class="setting-value">
+            <button class="num-btn" onclick="adjSetting('startingLives',-1)">-</button>
+            <span id="settingLives" style="width:24px;text-align:center;font-weight:700">3</span>
+            <button class="num-btn" onclick="adjSetting('startingLives',1)">+</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Min Players</span>
+          <div class="setting-value">
+            <button class="num-btn" onclick="adjSetting('minPlayers',-1)">-</button>
+            <span id="settingMin" style="width:24px;text-align:center;font-weight:700">3</span>
+            <button class="num-btn" onclick="adjSetting('minPlayers',1)">+</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Timer Min (sec)</span>
+          <div class="setting-value">
+            <button class="num-btn" onclick="adjTimerRange(0,-1)">-</button>
+            <span id="settingTimerMin" style="width:24px;text-align:center;font-weight:700">6</span>
+            <button class="num-btn" onclick="adjTimerRange(0,1)">+</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Timer Max (sec)</span>
+          <div class="setting-value">
+            <button class="num-btn" onclick="adjTimerRange(1,-1)">-</button>
+            <span id="settingTimerMax" style="width:24px;text-align:center;font-weight:700">18</span>
+            <button class="num-btn" onclick="adjTimerRange(1,1)">+</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Power-Ups Enabled</span>
+          <div class="setting-value">
+            <label class="toggle">
+              <input type="checkbox" id="settingPowerUps" checked onchange="togglePowerUps()" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="lobby-actions">
+      <div class="ready-row">
+        <button class="btn-safe" id="readyBtn" onclick="toggleReady()">Mark Ready</button>
+      </div>
+      <button class="btn-primary" id="startBtn" onclick="startGame()" style="display:none">Start Game</button>
+    </div>
+  </div>
+
+  <!-- GAME -->
+  <div id="gameScreen" class="screen">
+    <div class="game-players-bar" id="gamePlayersBar"></div>
+    <div class="game-center" id="gameCenter"></div>
+  </div>
+
+  <!-- POST ROUND -->
+  <div id="postRoundScreen" class="screen">
+    <div class="winner-emoji" id="winnerEmoji">🏆</div>
+    <div class="winner-name" id="winnerName">Player Wins!</div>
+    <p style="color:var(--text-muted);font-size:0.875rem">Round complete</p>
+    <div class="scores-list" id="scoresList"></div>
+    <button class="btn-primary" id="playAgainBtn" onclick="restartMatch()" style="display:none;width:100%;margin-top:8px">Play Again</button>
+    <button class="btn-secondary" id="lobbyWaitBtn" style="width:100%;margin-top:8px">Waiting for host...</button>
+  </div>
+
+  <!-- PASS LIST -->
+  <div id="passListOverlay" class="pass-list" style="display:none">
+    <h2>Pass the Bomb to...</h2>
+    <div class="pass-targets" id="passTargets"></div>
+    <button class="pass-cancel" onclick="closePassList()">Cancel</button>
+  </div>
+
+  <!-- EXPLOSION -->
+  <div id="explosionOverlay">
+    <div class="explosion-emoji">💥</div>
+    <div class="explosion-text" id="explosionText">BOOM!</div>
+    <div class="explosion-sub" id="explosionSub"></div>
+  </div>
+
+  <div id="toast"></div>
+</div>
+
+<script>
+  // ─── State ───────────────────────────────────────────────────────────────────
+  const socket = io();
+  let myId = null, myRoom = null, currentSettings = {};
+
+  // ─── Screen management ───────────────────────────────────────────────────────
+  function showScreen(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+  }
+
+  // ─── Toast ───────────────────────────────────────────────────────────────────
+  let toastTimer;
+  function showToast(msg, isError = false) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = 'show' + (isError ? ' error' : '');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.className = '', 2800);
+  }
+
+  // ─── Tab switching ───────────────────────────────────────────────────────────
+  function setTab(tab) {
+    document.querySelectorAll('.tab').forEach((t, i) => t.classList.toggle('active', (i === 0) === (tab === 'create')));
+    document.getElementById('createTab').style.display = tab === 'create' ? '' : 'none';
+    document.getElementById('joinTab').style.display = tab === 'join' ? '' : 'none';
+  }
+
+  // ─── Home actions ─────────────────────────────────────────────────────────────
+  function createRoom() {
+    const name = document.getElementById('homeName').value.trim();
+    if (!name) { showToast('Enter your name first', true); return; }
+    socket.emit('createRoom', { name });
+  }
+  function joinRoom() {
+    const name = document.getElementById('homeName').value.trim();
+    const code = document.getElementById('homeCode').value.trim().toUpperCase();
+    if (!name) { showToast('Enter your name first', true); return; }
+    if (!code) { showToast('Enter a room code', true); return; }
+    socket.emit('joinRoom', { code, name });
+  }
+  function leaveRoom() {
+    socket.disconnect(); socket.connect();
+    myId = null; myRoom = null;
+    showScreen('homeScreen');
+  }
+  function copyCode() {
+    if (!myRoom) return;
+    navigator.clipboard.writeText(myRoom.roomCode).then(() => showToast('Room code copied!'));
+  }
+
+  // ─── Lobby actions ────────────────────────────────────────────────────────────
+  function toggleReady() { socket.emit('toggleReady'); }
+  function startGame() { socket.emit('startGame'); }
+  function restartMatch() { socket.emit('restartMatch'); }
+
+  function adjSetting(key, delta) {
+    const s = { ...currentSettings };
+    const limits = { startingLives:[1,5], minPlayers:[2,10] };
+    const [min, max] = limits[key] || [1, 99];
+    s[key] = Math.max(min, Math.min(max, (s[key] || 0) + delta));
+    socket.emit('updateSettings', { [key]: s[key] });
+  }
+  function adjTimerRange(idx, delta) {
+    const range = [...(currentSettings.timerRange || [6, 18])];
+    range[idx] = Math.max(3, Math.min(60, range[idx] + delta));
+    if (range[0] > range[1]) range[1 - idx] = range[idx];
+    socket.emit('updateSettings', { timerRange: range });
+  }
+  function togglePowerUps() {
+    const val = document.getElementById('settingPowerUps').checked;
+    socket.emit('updateSettings', { powerUpsEnabled: val });
+  }
+
+  // ─── Game actions ─────────────────────────────────────────────────────────────
+  function cutBomb() { socket.emit('cutBomb'); }
+  function usePowerUp() { socket.emit('usePowerUp'); }
+  function openPassList() {
+    if (!myRoom) return;
+    const me = myRoom.players[myId];
+    if (!me?.hasBomb) return;
+    const targets = Object.values(myRoom.players).filter(p => p.isAlive && p.id !== myId);
+    const container = document.getElementById('passTargets');
+    container.innerHTML = '';
+    targets.forEach(p => {
+      const btn = document.createElement('button');
+      btn.className = 'pass-target-btn';
+      btn.innerHTML = `<div class="player-avatar chip-avatar skin-${p.skinId}">${p.name[0].toUpperCase()}</div><span>${p.name}</span>`;
+      btn.onclick = () => { socket.emit('passBomb', { targetId: p.id }); closePassList(); };
+      container.appendChild(btn);
+    });
+    document.getElementById('passListOverlay').style.display = 'flex';
+  }
+  function closePassList() {
+    document.getElementById('passListOverlay').style.display = 'none';
+  }
+
+  // ─── Render helpers ───────────────────────────────────────────────────────────
+  const skinEmoji = ['', '💣', '🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '⚫'];
+  const powerUpInfo = {
+    shield: { icon: '🛡️', label: 'Shield' },
+    freeze: { icon: '❄️', label: 'Freeze' },
+    reflect: { icon: '🔄', label: 'Reflect' },
+    peek: { icon: '👁️', label: 'Peek' },
+    rewind: { icon: '⏪', label: 'Rewind' },
+    passback: { icon: '↩️', label: 'Pass Back' },
+  };
+
+  function renderLobby(room) {
+    myRoom = room;
+    document.getElementById('lobbyCode').textContent = room.roomCode;
+    const players = Object.values(room.players);
+    document.getElementById('playerCount').textContent = players.length;
+    currentSettings = room.settings;
+    const isHost = room.hostId === myId;
+
+    // Settings
+    document.getElementById('hostSettingsSection').style.display = isHost ? '' : 'none';
+    document.getElementById('startBtn').style.display = isHost ? '' : 'none';
+    if (isHost) {
+      document.getElementById('settingLives').textContent = room.settings.startingLives;
+      document.getElementById('settingMin').textContent = room.settings.minPlayers;
+      document.getElementById('settingTimerMin').textContent = room.settings.timerRange[0];
+      document.getElementById('settingTimerMax').textContent = room.settings.timerRange[1];
+      document.getElementById('settingPowerUps').checked = room.settings.powerUpsEnabled;
+    }
+
+    // Ready button
+    const me = room.players[myId];
+    if (me) {
+      const btn = document.getElementById('readyBtn');
+      btn.textContent = me.isReady ? 'Unready' : 'Mark Ready';
+      btn.style.background = me.isReady ? 'rgba(255,68,68,0.15)' : '';
+      btn.style.color = me.isReady ? 'var(--danger)' : '';
+      btn.style.borderColor = me.isReady ? 'rgba(255,68,68,0.3)' : '';
+    }
+
+    // Player list
+    const list = document.getElementById('playerList');
+    list.innerHTML = '';
+    players.forEach(p => {
+      const div = document.createElement('div');
+      div.className = 'player-item' + (p.id === myId ? ' is-me' : '');
+      div.innerHTML = `
+        <div class="player-avatar skin-${p.skinId}">${p.name[0].toUpperCase()}</div>
+        <span class="player-name">${p.name}${p.id === myId ? ' (you)' : ''}</span>
+        <div class="player-badges">
+          ${p.isHost ? '<span class="badge badge-host">👑 Host</span>' : ''}
+          <span class="badge ${p.isReady ? 'badge-ready' : 'badge-notready'}">${p.isReady ? '✓ Ready' : 'Not ready'}</span>
+          ${isHost && p.id !== myId && room.state === 'lobby' ? `<button class="btn-danger btn-sm" onclick="kickPlayer('${p.id}')">Kick</button>` : ''}
+        </div>
+      `;
+      list.appendChild(div);
+    });
+  }
+
+  function kickPlayer(id) { socket.emit('kickPlayer', { targetId: id }); }
+
+  let bombTimer = null, isFrozen = false;
+
+  function renderGame(room) {
+    myRoom = room;
+    const me = room.players[myId];
+    const players = Object.values(room.players);
+
+    // Players bar
+    const bar = document.getElementById('gamePlayersBar');
+    bar.innerHTML = '';
+    players.forEach(p => {
+      const chip = document.createElement('div');
+      chip.className = 'game-player-chip' + (p.hasBomb ? ' has-bomb' : '') + (p.id === myId ? ' is-me' : '') + (!p.isAlive ? ' eliminated' : '');
+      const lives = Array.from({ length: room.settings.startingLives }, (_, i) => `<div class="life-dot${i >= p.lives ? ' lost' : ''}"></div>`).join('');
+      chip.innerHTML = `
+        <div class="chip-avatar skin-${p.skinId}">${p.name[0].toUpperCase()}</div>
+        <div class="chip-name">${p.name}</div>
+        <div class="chip-lives">${lives}</div>
+        ${p.hasBomb ? '<span style="font-size:1.1rem">💣</span>' : ''}
+        ${!p.isAlive ? '<span style="font-size:1rem">💀</span>' : ''}
+      `;
+      bar.appendChild(chip);
+    });
+
+    // Center
+    const center = document.getElementById('gameCenter');
+    if (!me || !me.isAlive) {
+      center.innerHTML = `<div class="waiting-display"><div class="waiting-bomb-emoji">💀</div><p style="margin-top:8px;color:var(--text-muted)">You have been eliminated</p><p class="waiting-bomb-holder" style="margin-top:16px">Watching the game...</p></div>`;
+      return;
+    }
+
+    if (me.hasBomb) {
+      const frozen = isFrozen;
+      const t = bombTimer ?? '?';
+      const isLow = typeof t === 'number' && t <= 5;
+      center.innerHTML = `
+        <div class="bomb-display" style="width:100%">
+          <div class="bomb-graphic${frozen?' frozen':''}">${frozen?'🧊':'💣'}</div>
+          <div class="timer-display${isLow?' low':''}${frozen?' frozen':''}" id="timerEl">${t}</div>
+          ${frozen ? `<div class="frozen-banner">FROZEN ❄️</div>` : ''}
+          ${me.powerUp ? `<div class="powerup-display">${powerUpInfo[me.powerUp]?.icon || ''} ${powerUpInfo[me.powerUp]?.label || me.powerUp} Power-Up!</div>` : ''}
+          <div class="bomb-actions" style="width:100%">
+            <button class="btn-cut btn-icon" style="min-height:64px;border-radius:var(--radius);font-size:1rem;font-weight:700" onclick="cutBomb()">✂️ Cut</button>
+            <button class="btn-pass btn-icon" style="min-height:64px;border-radius:var(--radius);font-size:1rem;font-weight:700" onclick="openPassList()">→ Pass</button>
+          </div>
+          ${me.powerUp ? `<button class="btn-powerup" onclick="usePowerUp()">${powerUpInfo[me.powerUp]?.icon || '⚡'} Use ${powerUpInfo[me.powerUp]?.label || 'Power-Up'}</button>` : ''}
+        </div>
+      `;
+    } else {
+      const holder = players.find(p => p.hasBomb);
+      center.innerHTML = `
+        <div class="waiting-display">
+          <div class="waiting-bomb-emoji">⏳</div>
+          <p style="color:var(--text-muted);margin-top:8px">Bomb is with</p>
+          <div class="waiting-bomb-holder">${holder ? holder.name : 'Unknown'} 💣</div>
+          ${me.powerUp ? `<div class="powerup-display mt12">${powerUpInfo[me.powerUp]?.icon || ''} ${powerUpInfo[me.powerUp]?.label || me.powerUp}</div>` : ''}
+          ${me.powerUp ? `<button class="btn-powerup mt8" onclick="usePowerUp()">${powerUpInfo[me.powerUp]?.icon || '⚡'} Use ${powerUpInfo[me.powerUp]?.label || 'Power-Up'}</button>` : ''}
+        </div>
+      `;
+    }
+  }
+
+  function renderPostRound(room, winnerId) {
+    myRoom = room;
+    const winner = room.players[winnerId];
+    document.getElementById('winnerEmoji').textContent = winner ? (winner.id === myId ? '🎉' : '🏆') : '💥';
+    document.getElementById('winnerName').textContent = winner ? `${winner.name} wins!` : 'No survivors!';
+    const scoresList = document.getElementById('scoresList');
+    scoresList.innerHTML = '';
+    Object.values(room.players).sort((a, b) => (room.roundWins[b.id] || 0) - (room.roundWins[a.id] || 0)).forEach(p => {
+      const row = document.createElement('div');
+      row.className = 'score-row';
+      row.innerHTML = `
+        <div class="player-avatar chip-avatar skin-${p.skinId}" style="width:32px;height:32px;font-size:0.85rem">${p.name[0].toUpperCase()}</div>
+        <span>${p.name}${p.id === myId ? ' (you)' : ''}</span>
+        <span class="score-wins">${room.roundWins[p.id] || 0}W</span>
+      `;
+      scoresList.appendChild(row);
+    });
+    const isHost = room.hostId === myId;
+    document.getElementById('playAgainBtn').style.display = isHost ? '' : 'none';
+    document.getElementById('lobbyWaitBtn').style.display = isHost ? 'none' : '';
+  }
+
+  // ─── Socket events ────────────────────────────────────────────────────────────
+  socket.on('roomCreated', ({ roomCode, playerId }) => {
+    myId = playerId;
+    showScreen('lobbyScreen');
+    document.getElementById('lobbyCode').textContent = roomCode;
+  });
+
+  socket.on('roomJoined', ({ playerId }) => {
+    myId = playerId;
+    showScreen('lobbyScreen');
+  });
+
+  socket.on('roomUpdate', (room) => {
+    myRoom = room;
+    if (room.state === 'lobby') { renderLobby(room); showScreen('lobbyScreen'); }
+    else if (room.state === 'inGame') { renderGame(room); showScreen('gameScreen'); }
+  });
+
+  socket.on('bombTimer', ({ timer, isFrozen: frozen }) => {
+    bombTimer = timer;
+    isFrozen = frozen;
+    const el = document.getElementById('timerEl');
+    if (el) {
+      el.textContent = timer;
+      el.className = 'timer-display' + (timer <= 5 ? ' low' : '') + (frozen ? ' frozen' : '');
+    }
+    if (myRoom) {
+      const me = myRoom.players[myId];
+      if (me?.hasBomb) renderGame(myRoom);
+    }
+  });
+
+  socket.on('explosion', ({ playerId, skinId, shieldUsed, livesRemaining }) => {
+    const player = myRoom?.players[playerId];
+    const overlay = document.getElementById('explosionOverlay');
+    document.getElementById('explosionText').textContent = shieldUsed ? `${player?.name || 'Someone'} used a Shield!` : `${player?.name || 'Someone'} EXPLODED!`;
+    document.getElementById('explosionSub').textContent = shieldUsed ? 'Shield absorbed the blast!' : (livesRemaining > 0 ? `${livesRemaining} lives remaining` : 'Eliminated!');
+    overlay.classList.add('active');
+    setTimeout(() => overlay.classList.remove('active'), 2000);
+    if (myRoom?.players[playerId]) {
+      if (!shieldUsed) { myRoom.players[playerId].lives = livesRemaining; if (livesRemaining <= 0) myRoom.players[playerId].isAlive = false; }
+    }
+    bombTimer = null;
+  });
+
+  socket.on('roundEnd', ({ winnerId, roundWins }) => {
+    if (myRoom) { myRoom.roundWins = roundWins; myRoom.state = 'postRound'; }
+    renderPostRound(myRoom || {}, winnerId);
+    showScreen('postRoundScreen');
+  });
+
+  socket.on('bombPassed', ({ fromId, toId, timer }) => {
+    bombTimer = null;
+    if (myRoom) {
+      Object.values(myRoom.players).forEach(p => p.hasBomb = p.id === toId);
+    }
+    const from = myRoom?.players[fromId];
+    const to = myRoom?.players[toId];
+    if (from && to) showToast(`${from.name} passed to ${to.name}`);
+  });
+
+  socket.on('bombFrozen', ({ playerId, duration }) => {
+    const p = myRoom?.players[playerId];
+    showToast(`${p?.name || 'Someone'} froze the bomb for ${duration}s! ❄️`);
+  });
+
+  socket.on('bombCut', ({ playerId }) => {
+    const p = myRoom?.players[playerId];
+    showToast(`${p?.name || 'Someone'} cut the wire! ✂️`);
+  });
+
+  socket.on('bombRewound', ({ playerId }) => {
+    const p = myRoom?.players[playerId];
+    showToast(`${p?.name || 'Someone'} rewound the timer! ⏪`);
+  });
+
+  socket.on('reflectPending', ({ playerId }) => {
+    const p = myRoom?.players[playerId];
+    showToast(`${p?.name || 'Someone'} has Reflect ready! 🔄`);
+  });
+
+  socket.on('reflectActivated', ({ playerId }) => {
+    const p = myRoom?.players[playerId];
+    showToast(`Reflect blocked! ${p?.name || 'Someone'} bounced it back! 🔄`);
+  });
+
+  socket.on('peekResult', ({ timer }) => {
+    showToast(`Timer peek: ${timer} seconds! 👁️`);
+  });
+
+  socket.on('hostChanged', ({ newHostId }) => {
+    const p = myRoom?.players[newHostId];
+    showToast(`${p?.name || 'Someone'} is now the host 👑`);
+  });
+
+  socket.on('kicked', () => {
+    myId = null; myRoom = null;
+    showScreen('homeScreen');
+    showToast('You were kicked from the room', true);
+  });
+
+  socket.on('error', ({ message }) => {
+    showToast(message, true);
+  });
+
+  // Enter key support
+  document.getElementById('homeName').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('homeCode').value ? joinRoom() : createRoom(); });
+  document.getElementById('homeCode').addEventListener('keydown', e => { if (e.key === 'Enter') joinRoom(); });
+  document.getElementById('homeCode').addEventListener('input', e => { e.target.value = e.target.value.toUpperCase(); });
+</script>
+</body>
+</html>
