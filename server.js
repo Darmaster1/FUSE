@@ -20,11 +20,10 @@ const DEFAULT_SETTINGS = {
   minPlayers: 3,
   maxPlayers: 10,
   roundsToWin: 1,
-  powerUpsEnabled: true,
   timerRange: [6, 18],
 };
 
-const POWER_UPS = ["shield", "freeze", "reflect", "peek", "rewind", "passback"];
+const AMPLIFIERS = ["shield", "coldHands", "hotHands", "quickReflex"];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function genCode() {
@@ -46,7 +45,6 @@ function createRoom() {
     bomb: null,
     roundActive: false,
     tickInterval: null,
-    pendingReflect: null,
     roundWins: {},
   };
   rooms.set(code, room);
@@ -59,7 +57,8 @@ function addPlayer(room, id, name) {
   const player = {
     id, name: name.slice(0, 20), lives: room.settings.startingLives,
     isAlive: true, isHost: isFirst, isReady: false, skinId,
-    powerUp: null, hasBomb: false, lastSenderId: null, joinedAt: Date.now(),
+    amplifier: null, quickReflexAvailable: false,
+    hasBomb: false, lastSenderId: null, joinedAt: Date.now(),
   };
   if (isFirst) room.hostId = id;
   room.players[id] = player;
@@ -90,15 +89,26 @@ function randomAlive(room, excludeId) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
-function assignPowerUps(room) {
-  if (!room.settings.powerUpsEnabled) return;
-  const count = Object.keys(room.players).length <= 4 ? 1 : 2;
+function assignAmplifiers(room) {
+  const alive = getAlive(room);
+  const count = alive.length <= 4 ? 1 : 2;
+
   for (const p of Object.values(room.players)) {
-    if (!p.powerUp) {
-      for (let i = 0; i < count; i++) {
-        p.powerUp = POWER_UPS[Math.floor(Math.random() * POWER_UPS.length)];
-      }
-    }
+    p.amplifier = null;
+    p.quickReflexAvailable = false;
+  }
+
+  const shuffled = [...alive].sort(() => Math.random() - 0.5);
+  const selected = shuffled.slice(0, Math.min(count, shuffled.length));
+
+  const usedTypes = new Set();
+  for (const player of selected) {
+    const available = AMPLIFIERS.filter(a => !usedTypes.has(a));
+    const pool = available.length > 0 ? available : AMPLIFIERS;
+    const chosen = pool[Math.floor(Math.random() * pool.length)];
+    player.amplifier = chosen;
+    if (chosen === "quickReflex") player.quickReflexAvailable = true;
+    usedTypes.add(chosen);
   }
 }
 
@@ -106,15 +116,15 @@ function startRound(room) {
   for (const p of Object.values(room.players)) {
     p.lives = room.settings.startingLives;
     p.isAlive = true; p.hasBomb = false;
-    p.lastSenderId = null; p.powerUp = null;
+    p.lastSenderId = null; p.amplifier = null; p.quickReflexAvailable = false;
   }
-  assignPowerUps(room);
+  assignAmplifiers(room);
   const holder = randomAlive(room);
   if (!holder) return;
   const [min, max] = room.settings.timerRange;
   const timer = Math.floor(Math.random() * (max - min + 1)) + min;
   holder.hasBomb = true;
-  room.bomb = { holderId: holder.id, timer, initialTimer: timer, lastSenderId: null, isFrozen: false, freezeEndTime: null };
+  room.bomb = { holderId: holder.id, timer, initialTimer: timer, lastSenderId: null };
   room.roundActive = true;
   room.state = "inGame";
 }
@@ -126,7 +136,7 @@ function resetBomb(room, excludeId) {
   const [min, max] = room.settings.timerRange;
   const timer = Math.floor(Math.random() * (max - min + 1)) + min;
   holder.hasBomb = true;
-  room.bomb = { holderId: holder.id, timer, initialTimer: timer, lastSenderId: null, isFrozen: false, freezeEndTime: null };
+  room.bomb = { holderId: holder.id, timer, initialTimer: timer, lastSenderId: null };
 }
 
 function broadcastRoom(room) {
@@ -135,7 +145,7 @@ function broadcastRoom(room) {
     settings: room.settings, roundWins: room.roundWins, roundActive: room.roundActive,
     players: Object.fromEntries(Object.entries(room.players).map(([id, p]) => [id, {
       id: p.id, name: p.name, lives: p.lives, isAlive: p.isAlive, isHost: p.isHost,
-      isReady: p.isReady, skinId: p.skinId, hasBomb: p.hasBomb, powerUp: p.powerUp,
+      isReady: p.isReady, skinId: p.skinId, hasBomb: p.hasBomb, amplifier: p.amplifier,
     }])),
   };
   io.to(room.roomCode).emit("roomUpdate", pub);
@@ -144,7 +154,7 @@ function broadcastRoom(room) {
 function sendTimer(room) {
   if (!room.bomb) return;
   io.to(room.bomb.holderId).emit("bombTimer", {
-    timer: room.bomb.timer, isFrozen: room.bomb.isFrozen, initialTimer: room.bomb.initialTimer,
+    timer: room.bomb.timer, initialTimer: room.bomb.initialTimer,
   });
 }
 
@@ -154,8 +164,8 @@ function handleExplosion(room) {
   if (!holder) return;
 
   let shieldUsed = false;
-  if (holder.powerUp === "shield") {
-    holder.powerUp = null; shieldUsed = true;
+  if (holder.amplifier === "shield") {
+    holder.amplifier = null; shieldUsed = true;
     io.to(room.roomCode).emit("explosion", { playerId: holder.id, skinId: holder.skinId, shieldUsed: true });
   } else {
     holder.lives -= 1;
@@ -182,11 +192,6 @@ function startTick(room) {
   if (room.tickInterval) clearInterval(room.tickInterval);
   room.tickInterval = setInterval(() => {
     if (!room.bomb || !room.roundActive) return;
-    const now = Date.now();
-    if (room.bomb.isFrozen && room.bomb.freezeEndTime) {
-      if (now >= room.bomb.freezeEndTime) { room.bomb.isFrozen = false; room.bomb.freezeEndTime = null; }
-      else { sendTimer(room); return; }
-    }
     room.bomb.timer -= 1;
     sendTimer(room);
     if (room.bomb.timer <= 0) handleExplosion(room);
@@ -197,10 +202,10 @@ function startTick(room) {
 io.on("connection", (socket) => {
   socket.on("createRoom", ({ name }) => {
     const room = createRoom();
-    const player = addPlayer(room, socket.id, name);
+    addPlayer(room, socket.id, name);
     socketToRoom.set(socket.id, room.roomCode);
     socket.join(room.roomCode);
-    socket.emit("roomCreated", { roomCode: room.roomCode, playerId: socket.id, player });
+    socket.emit("roomCreated", { roomCode: room.roomCode, playerId: socket.id });
     broadcastRoom(room);
   });
 
@@ -209,10 +214,10 @@ io.on("connection", (socket) => {
     if (!room) { socket.emit("error", { message: "Room not found" }); return; }
     if (room.state !== "lobby") { socket.emit("error", { message: "Game already in progress" }); return; }
     if (Object.keys(room.players).length >= room.settings.maxPlayers) { socket.emit("error", { message: "Room is full" }); return; }
-    const player = addPlayer(room, socket.id, name);
+    addPlayer(room, socket.id, name);
     socketToRoom.set(socket.id, room.roomCode);
     socket.join(room.roomCode);
-    socket.emit("roomJoined", { roomCode: room.roomCode, playerId: socket.id, player });
+    socket.emit("roomJoined", { roomCode: room.roomCode, playerId: socket.id });
     broadcastRoom(room);
   });
 
@@ -257,7 +262,11 @@ io.on("connection", (socket) => {
     const p = room.players[socket.id];
     if (!p?.isAlive) return;
     const t = room.bomb.timer;
-    if (Math.random() < Math.max(0, 40 - 1.5 * t) / 100) { handleExplosion(room); return; }
+    // Hot Hands: lower explosion probability
+    const prob = p.amplifier === "hotHands"
+      ? Math.max(0, 35 - 1.5 * t) / 100
+      : Math.max(0, 40 - 1.5 * t) / 100;
+    if (Math.random() < prob) { handleExplosion(room); return; }
     room.bomb.timer = Math.max(1, room.bomb.timer - 2);
     sendTimer(room);
     io.to(room.roomCode).emit("bombCut", { playerId: socket.id });
@@ -269,45 +278,37 @@ io.on("connection", (socket) => {
     const from = room.players[socket.id];
     const to = room.players[targetId];
     if (!from?.isAlive || !to?.isAlive) return;
-    from.hasBomb = false; to.hasBomb = true;
-    room.bomb.lastSenderId = socket.id; room.bomb.holderId = targetId;
-    to.lastSenderId = socket.id;
-    room.bomb.timer = Math.floor(room.bomb.timer / 2);
-    broadcastRoom(room); sendTimer(room);
-    io.to(room.roomCode).emit("bombPassed", { fromId: socket.id, toId: targetId, timer: room.bomb.timer });
-  });
 
-  socket.on("usePowerUp", () => {
-    const room = rooms.get(socketToRoom.get(socket.id));
-    if (!room?.bomb || !room.roundActive) return;
-    const p = room.players[socket.id];
-    if (!p?.isAlive || !p.powerUp) return;
-    const pu = p.powerUp;
+    const currentTimer = room.bomb.timer;
 
-    if (pu === "freeze" && !room.bomb.isFrozen) {
-      room.bomb.isFrozen = true; room.bomb.freezeEndTime = Date.now() + 5000;
-      io.to(room.roomCode).emit("bombFrozen", { playerId: socket.id, duration: 5 });
-    } else if (pu === "reflect") {
-      room.pendingReflect = { playerId: socket.id, senderId: room.bomb.lastSenderId ?? "", expiresAt: Date.now() + 2000 };
-      io.to(room.roomCode).emit("reflectPending", { playerId: socket.id });
-    } else if (pu === "peek") {
-      socket.emit("peekResult", { timer: room.bomb.timer });
-    } else if (pu === "rewind" && room.bomb.timer < room.bomb.initialTimer) {
-      room.bomb.timer = Math.min(room.bomb.timer + 5, room.bomb.initialTimer);
-      sendTimer(room); io.to(room.roomCode).emit("bombRewound", { playerId: socket.id });
-    } else if (pu === "passback" && room.bomb.holderId === socket.id) {
-      const senderId = room.bomb.lastSenderId;
-      const sender = senderId ? room.players[senderId] : null;
-      if (!sender?.isAlive) { socket.emit("error", { message: "Original sender unavailable" }); return; }
-      p.hasBomb = false; sender.hasBomb = true;
-      room.bomb.holderId = senderId; room.bomb.lastSenderId = socket.id;
-      room.bomb.timer = Math.floor(room.bomb.timer / 2);
-      broadcastRoom(room); sendTimer(room);
-      io.to(room.roomCode).emit("bombPassed", { fromId: socket.id, toId: senderId, timer: room.bomb.timer });
+    // Block pass if timer < 1
+    if (currentTimer < 1) {
+      socket.emit("error", { message: "Timer too low — cannot pass!" });
+      return;
     }
 
-    p.powerUp = null;
-    broadcastRoom(room);
+    let newTimer;
+    if (from.amplifier === "quickReflex" && from.quickReflexAvailable) {
+      // Quick Reflex: first pass doesn't halve timer
+      newTimer = currentTimer;
+      from.quickReflexAvailable = false;
+    } else if (from.amplifier === "coldHands") {
+      // Cold Hands: floor(timer/2) + 1
+      newTimer = Math.floor(currentTimer / 2) + 1;
+    } else if (currentTimer <= 2) {
+      // Anti-instant-death: receive at least 2s
+      newTimer = 2;
+    } else {
+      newTimer = Math.floor(currentTimer / 2);
+      if (newTimer < 2) newTimer = 2;
+    }
+
+    from.hasBomb = false; to.hasBomb = true;
+    room.bomb.lastSenderId = socket.id; room.bomb.holderId = targetId;
+    room.bomb.timer = newTimer; room.bomb.initialTimer = newTimer;
+
+    broadcastRoom(room); sendTimer(room);
+    io.to(room.roomCode).emit("bombPassed", { fromId: socket.id, toId: targetId, timer: newTimer });
   });
 
   socket.on("restartMatch", () => {
@@ -318,7 +319,8 @@ io.on("connection", (socket) => {
     room.state = "lobby"; room.roundActive = false; room.bomb = null;
     for (const p of Object.values(room.players)) {
       p.lives = room.settings.startingLives; p.isAlive = true;
-      p.hasBomb = false; p.isReady = false; p.powerUp = null; p.lastSenderId = null;
+      p.hasBomb = false; p.isReady = false;
+      p.amplifier = null; p.quickReflexAvailable = false; p.lastSenderId = null;
     }
     broadcastRoom(room);
   });
@@ -331,7 +333,7 @@ io.on("connection", (socket) => {
     if (!room) return;
     const wasHost = room.hostId === socket.id;
     const hadBomb = room.bomb?.holderId === socket.id;
-    const bombTimer = room.bomb?.timer;
+    const savedTimer = room.bomb?.timer;
     removePlayer(room, socket.id);
     if (!Object.keys(room.players).length) { rooms.delete(code); return; }
     if (wasHost) {
@@ -344,7 +346,7 @@ io.on("connection", (socket) => {
         for (const p of Object.values(room.players)) p.hasBomb = false;
         newHolder.hasBomb = true;
         room.bomb.holderId = newHolder.id;
-        if (bombTimer !== undefined) room.bomb.timer = bombTimer;
+        if (savedTimer !== undefined) room.bomb.timer = savedTimer;
         sendTimer(room);
       }
     }
@@ -359,5 +361,5 @@ io.on("connection", (socket) => {
 httpServer.listen(PORT, () => {
   console.log(`\n🎮 FUSE – Enhanced Edition`);
   console.log(`🚀 Server running at http://localhost:${PORT}`);
-  console.log(`📱 Open on your phone or share the URL on your local network\n`);
+  console.log(`📱 Open in multiple browser tabs to test multiplayer\n`);
 });
