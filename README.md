@@ -2,8 +2,6 @@
 
 Real-time multiplayer bomb-passing browser game. Built with Node.js + Express + Socket.IO.
 
-## Quick Start (Local)
-
 
 ## How to Play
 
@@ -18,17 +16,6 @@ Real-time multiplayer bomb-passing browser game. Built with Node.js + Express + 
 9. When the timer hits 0 — BOOM! That player loses a life
 10. Last player standing wins!
 
-## Power-Ups
-
-| Power-Up | Effect |
-|---|---|
-| 🛡️ Shield | Absorbs one explosion — no damage |
-| ❄️ Freeze | Freezes the bomb timer for 5 seconds |
-| 🔄 Reflect | Bounces back the next incoming pass |
-| 👁️ Peek | Reveals the current timer to you |
-| ⏪ Rewind | Adds 5 seconds back to the timer |
-| ↩️ Pass Back | Instantly passes the bomb back to whoever sent it |
-
 ## Game Settings (Host Configurable)
 
 | Setting | Default | Range |
@@ -38,6 +25,7 @@ Real-time multiplayer bomb-passing browser game. Built with Node.js + Express + 
 | Max Players | 10 | — |
 | Timer Range | 6–18 sec | — |
 | Power-Ups | Enabled | — |
+
 ## Folder Structure
 
 ```
@@ -54,4 +42,5 @@ fuse-standalone/
 - **Backend**: Node.js + Express 4 + Socket.IO 4
 - **Frontend**: Vanilla HTML/CSS/JavaScript (no build step needed)
 - **Real-time**: WebSockets via Socket.IO
+
 
